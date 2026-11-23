@@ -107,6 +107,10 @@ def check_before_run(job):
         placement = disks.check_pair(source, dest)
     except PathError as e:
         raise RunRefused(str(e))
+    for label, saved, now in (("Source", source, placement.source), ("Destination", dest, placement.dest)):
+        if saved != now:
+            raise RunRefused(f"{label} {saved} now leads to {now} (a folder on the way became a symlink). "
+                             "Edit and re-save the job if this is intended.")
     expected_dst = set(job["dst_disks"].split(","))
     if placement.dst_disks != expected_dst:
         raise RunRefused(

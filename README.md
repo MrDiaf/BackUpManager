@@ -62,10 +62,15 @@ from any device on your local network (`make up` prints the address). Log in wit
 username and the password shown by `make password`.
 
 1. Click **+ New job**.
-2. Enter the **source** and **destination** as normal host paths, for example
-   `/home/ronny` → `/mnt/bulk/backups/home`, or `/mnt/bulk/photos` →
-   `/home/ronny/backups/photos` for the other direction. The form lists your drives, and an
-   error explains why a pair is refused.
+2. Choose the **source** and **destination** folders. You can:
+   - click **Browse…** to pick a folder, with shortcuts to your home folder and each drive.
+     For the destination, **Use new folder …** creates a subfolder named after the source;
+   - type a path: `~` means your home folder, and symlinks are followed (for example
+     `~/Bulk/photos`, where `~/Bulk` links to `/mnt/bulk`, is stored as `/mnt/bulk/photos`).
+
+   Under each field you see the real path, which drive it is on, and whether it can be
+   used, for example "same drive as the source" or "folder already has other files". The
+   same rules are checked again when you save.
 3. Pick *Mirror* or *Dated daily copies* and set the time.
 4. Click **Check (dry run)** beside Save to confirm the drives and paths are right and to
    see what the first backup would copy. Nothing is saved or written. Then click **Save**.
@@ -127,8 +132,9 @@ So:
 ## Known limitations
 
 - **Two runs on the same day** in dated mode: only the newest copy of that day is kept.
-- **Symlinked paths**: source and destination must be real paths, not paths through a
-  symlink, because absolute symlinks resolve differently inside the container.
+- **Symlinks are resolved when you save**: the job stores the real path. If a folder on
+  that path later becomes a symlink to somewhere else, runs are refused until you re-save
+  the job. `~` means the home folder of whoever ran `make up`.
 - **No notifications**: failures show only on the dashboard. Look at it now and then.
 - **Back up the app's own state** if you care about job definitions: add a job for this
   project folder, or just re-create the jobs after a reinstall. Backups on disk don't

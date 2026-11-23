@@ -45,3 +45,9 @@ Order: 01 → 02 → 03 → 04 → 05. Each milestone depends on the previous on
 - [x] A check writes nothing: no pre-command, no marker, no snapshot, no pruning
 - [x] Checks appear in the job's run history but don't change the dashboard's last-backup status
 - [x] The job form has a Check button beside Save that dry-runs the unsaved values and shows the result in the form
+
+## Milestone 08 — Path assistance (v1.2.0)
+- [x] `~` and symlinked paths (e.g. `~/Bulk` → `/mnt/bulk`) are accepted and stored as the real path
+- [x] Under the source and destination fields, live feedback shows the real path, its drive and whether it is usable
+- [x] A Browse… button opens a folder picker with shortcuts to Home and each drive
+- [x] A run is refused if a saved path now resolves somewhere else (e.g. a folder was replaced by a symlink)

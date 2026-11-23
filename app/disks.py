@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 
 HOST_ROOT = os.environ.get("HOST_ROOT", "/host")
+HOST_HOME = os.environ.get("HOST_HOME", "")  # $HOME of the user who ran `make up`; what ~ means
+MAX_SYMLINKS = 40
 SYS_ROOT = "/sys"
 MOUNTINFO = "/proc/self/mountinfo"
 
@@ -19,8 +21,12 @@ class PathError(ValueError):
 
 def normalize(host_path):
     p = (host_path or "").strip()
+    if p == "~" or p.startswith("~/"):
+        if not HOST_HOME:
+            raise PathError("Don't know which home folder ~ is. Enter the full path, starting with /.")
+        p = HOST_HOME + p[1:]
     if not p.startswith("/"):
-        raise PathError(f"'{p}' is not an absolute path (it must start with /).")
+        raise PathError(f"'{p}' is not a full path. Start it with / (or ~ for your home folder), or use Browse.")
     p = "/" + os.path.normpath(p).lstrip("/")
     return p
 
@@ -42,18 +48,33 @@ def is_within(child, parent):
     return child == parent or parent == "/" or child.startswith(parent.rstrip("/") + "/")
 
 
-def check_no_symlinks(host_path):
-    # Absolute symlinks point at host paths, which mean something else inside the
-    # container, so we only accept real paths.
-    current = HOST_ROOT
-    for part in host_path.strip("/").split("/"):
-        if not part:
+def resolve(host_path):
+    """The real host path, following symlinks the way the host would.
+
+    os.path.realpath can't be used: an absolute symlink target like /mnt/bulk means
+    /host/mnt/bulk inside the container. Missing trailing parts are kept as typed.
+    """
+    parts = [p for p in normalize(host_path).split("/") if p]
+    current, hops = "/", 0
+    while parts:
+        part = parts.pop(0)
+        if part == ".":
             continue
-        current = os.path.join(current, part)
-        if os.path.islink(current):
-            raise PathError(f"{to_host(current)} is a symlink. Enter the real path it points to.")
-        if not os.path.exists(current):
-            return
+        if part == "..":
+            current = os.path.dirname(current)
+            continue
+        candidate = os.path.join(current, part)
+        if os.path.islink(to_container(candidate)):
+            hops += 1
+            if hops > MAX_SYMLINKS:
+                raise PathError(f"Too many symlinks in {host_path}.")
+            target = os.readlink(to_container(candidate))
+            if target.startswith("/"):
+                current = "/"
+            parts = [p for p in target.split("/") if p] + parts
+            continue
+        current = candidate
+    return current
 
 
 def nearest_existing(container_path):
@@ -156,13 +177,11 @@ class Placement:
 
 def check_pair(source, dest):
     """Validate a source/destination pair of host paths. Raises PathError."""
-    source, dest = normalize(source), normalize(dest)
+    source, dest = resolve(source), resolve(dest)
     if is_within(dest, source):
         raise PathError("The destination is inside the source. It would back itself up.")
     if is_within(source, dest):
         raise PathError("The source is inside the destination.")
-    check_no_symlinks(source)
-    check_no_symlinks(dest)
 
     csrc, cdst = to_container(source), to_container(dest)
     if not os.path.isdir(csrc):

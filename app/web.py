@@ -7,12 +7,12 @@ import traceback
 from datetime import datetime
 from urllib.parse import urlsplit
 
-from flask import Flask, Response, abort, flash, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
 
 import db
 import disks
 from disks import PathError
-from engine import Engine, RunFailed, RunRefused, check_job, human_size, next_occurrence
+from engine import MARKER, Engine, RunFailed, RunRefused, check_job, human_size, next_occurrence
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32)  # only used for flash messages
@@ -60,6 +60,77 @@ def guard():
 @app.get("/health")
 def health():
     return "ok"
+
+
+# --- path assistance for the job form ------------------------------------------
+
+BROWSE_LIMIT = 500
+
+
+def drive_of(host_path):
+    """(drive label, mount point) of the nearest existing folder, or (None, None)."""
+    try:
+        existing = disks.nearest_existing(disks.to_container(host_path))
+        names = sorted(disks.disks_of(existing))
+        return ", ".join(disks.disk_label(n) for n in names), disks.to_host(disks.mount_point(existing))
+    except (OSError, PathError):
+        return None, None
+
+
+@app.get("/api/path")
+def api_path():
+    """What a typed path means: real path, drive, and whether it exists / is empty / is ours."""
+    try:
+        real = disks.resolve(request.args.get("p", ""))
+    except PathError as e:
+        return jsonify(ok=False, error=str(e))
+    cpath = disks.to_container(real)
+    drive, mount = drive_of(real)
+    info = {"ok": True, "real": real, "exists": os.path.exists(cpath), "is_dir": os.path.isdir(cpath),
+            "drive": drive, "mount": mount}
+    if info["is_dir"]:
+        try:
+            entries = os.listdir(cpath)
+            info.update(empty=not entries, marker=MARKER in entries)
+        except OSError as e:
+            info.update(ok=False, error=str(e))
+    return jsonify(info)
+
+
+@app.get("/api/browse")
+def api_browse():
+    """Subfolders of a folder, for the Browse picker."""
+    try:
+        path = disks.resolve(request.args.get("p") or disks.HOST_HOME or "/")
+    except PathError:
+        path = "/"
+    cpath = disks.to_container(path)
+    while not os.path.isdir(cpath):          # typed a missing folder: show its nearest parent
+        path = os.path.dirname(path)
+        cpath = disks.to_container(path)
+    dirs = []
+    try:
+        for e in sorted(os.scandir(cpath), key=lambda e: e.name.lower()):
+            if e.name.startswith(".") or len(dirs) > BROWSE_LIMIT:
+                continue
+            target = os.path.join(path, e.name)
+            if e.is_symlink():  # host symlinks (e.g. ~/Bulk -> /mnt/bulk) must be resolved host-side
+                try:
+                    target = disks.resolve(target)
+                except PathError:
+                    continue
+                if not os.path.isdir(disks.to_container(target)):
+                    continue
+                dirs.append({"name": e.name, "path": target, "link": True})
+            elif e.is_dir(follow_symlinks=False):
+                dirs.append({"name": e.name, "path": target, "link": False})
+    except OSError as e:
+        return jsonify(error=str(e), path=path, parent=os.path.dirname(path), dirs=[], places=[])
+    places = ([{"label": f"Home ({disks.HOST_HOME})", "path": disks.HOST_HOME}] if disks.HOST_HOME else [])
+    places += [{"label": f"{d['mount']} — {d['disk']}", "path": d["mount"]} for d in disks.drives()]
+    drive, _ = drive_of(path)
+    return jsonify(path=path, parent=None if path == "/" else os.path.dirname(path), drive=drive,
+                   dirs=dirs[:BROWSE_LIMIT], truncated=len(dirs) > BROWSE_LIMIT, places=places)
 
 
 # --- formatting -------------------------------------------------------------------

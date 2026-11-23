@@ -65,6 +65,48 @@ class Auth(unittest.TestCase):
         self.assertEqual(db.jobs(), [])
 
 
+class PathApi(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = self.tmp.name
+        os.makedirs(os.path.join(root, "home/me/Docs"))
+        os.makedirs(os.path.join(root, "home/me/.hidden"))
+        os.makedirs(os.path.join(root, "mnt/bulk/backup"))
+        open(os.path.join(root, "mnt/bulk/backup/other.txt"), "w").close()
+        os.symlink("/mnt/bulk", os.path.join(root, "home/me/Bulk"))
+        self.patches = [mock.patch.object(web.disks, "HOST_ROOT", root),
+                        mock.patch.object(web.disks, "HOST_HOME", "/home/me"),
+                        mock.patch.object(web.disks, "drives", lambda: []),
+                        mock.patch.object(web, "drive_of", lambda p: ("sdb" if "bulk" in p else "nvme0n1", "/")),
+                        mock.patch.dict(web.app.config, {"PASSWORD": "pw"})]
+        for p in self.patches:
+            p.start()
+        self.client = web.app.test_client()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.tmp.cleanup()
+
+    def get(self, url):
+        return self.client.get(url, headers=basic("pw")).get_json()
+
+    def test_browse_home_lists_folders_and_resolves_links(self):
+        data = self.get("/api/browse")
+        self.assertEqual(data["path"], "/home/me")
+        self.assertEqual([(d["name"], d["path"]) for d in data["dirs"]],
+                         [("Bulk", "/mnt/bulk"), ("Docs", "/home/me/Docs")])
+
+    def test_path_info_through_symlink(self):
+        data = self.get("/api/path?p=~/Bulk/backup")
+        self.assertEqual(data["real"], "/mnt/bulk/backup")
+        self.assertEqual((data["exists"], data["empty"], data["marker"]), (True, False, False))
+        self.assertFalse(self.get("/api/path?p=~/Bulk/new")["exists"])
+
+    def test_path_info_relative_path_is_an_error(self):
+        self.assertFalse(self.get("/api/path?p=Documents")["ok"])
+
+
 class PasswordFile(unittest.TestCase):
     def test_generated_once_and_reused(self):
         with tempfile.TemporaryDirectory() as tmp, \

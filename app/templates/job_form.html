@@ -13,11 +13,17 @@
 <form method="post">
   <label>Name <input type="text" name="name" value="{{ job.name }}" required></label>
 
-  <label>Source folder <span class="mute">— host path to back up, e.g. /home/you</span>
-    <input type="text" name="source" value="{{ job.source }}" required placeholder="/home/you"></label>
+  <label for="source">Source folder <span class="mute">— the folder to back up. Type a path (<code>~</code> = your home folder) or click Browse.</span></label>
+  <div class="pathrow"><input type="text" id="source" name="source" value="{{ job.source }}" required placeholder="~/Documents" autocomplete="off">
+    <button type="button" class="browse" data-for="source">Browse…</button></div>
+  <div class="pathinfo" id="source-info"></div>
+  <div class="picker" id="source-picker" hidden></div>
 
-  <label>Destination folder <span class="mute">— host path on a <em>different</em> drive; it must be empty or new on the first run</span>
-    <input type="text" name="dest" value="{{ job.dest }}" required placeholder="/mnt/bulk/backups/home"></label>
+  <label for="dest">Destination folder <span class="mute">— where the backup goes, on a <em>different</em> drive. Use a new or empty folder; it is created if missing.</span></label>
+  <div class="pathrow"><input type="text" id="dest" name="dest" value="{{ job.dest }}" required placeholder="/mnt/bulk/backups/documents" autocomplete="off">
+    <button type="button" class="browse" data-for="dest">Browse…</button></div>
+  <div class="pathinfo" id="dest-info"></div>
+  <div class="picker" id="dest-picker" hidden></div>
 
   <fieldset>
     <legend>Mode</legend>
@@ -43,6 +49,94 @@
     <button name="action" value="check" title="Dry run with these values: checks the drives and shows what would be copied. Nothing is saved or written.">Check (dry run)</button>
     <a class="button" href="{{ url_for('job_page', job_id=job_id) if job_id else url_for('dashboard') }}">Cancel</a></p>
 </form>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = Object.assign(document.createElement(tag), attrs);
+    n.append(...kids);
+    return n;
+  };
+  const api = (path, p) => fetch(`${path}?p=${encodeURIComponent(p)}`, {credentials: "same-origin"}).then(r => r.json());
+  const basename = p => p.replace(/\/+$/, "").split("/").pop();
+  const info = {source: null, dest: null};
+
+  // --- live info under each field --------------------------------------------
+  function line(cls, text) { return el("div", {className: cls, textContent: text}); }
+
+  function render(field) {
+    const box = $(field + "-info"), i = info[field], typed = $(field).value.trim();
+    box.replaceChildren();
+    if (!typed || !i) return;
+    if (!i.ok) return box.append(line("failed", "✗ " + i.error));
+    const where = (i.real !== typed ? `→ ${i.real}` : i.real) + (i.drive ? `  ·  drive ${i.drive}` : "");
+    if (field === "source") {
+      if (!i.exists) box.append(line("failed", `✗ ${i.real} does not exist`));
+      else if (!i.is_dir) box.append(line("failed", `✗ ${i.real} is a file, not a folder`));
+      else box.append(line("ok", "✓ " + where));
+    } else {
+      const suggestion = info.source?.ok && info.source.is_dir ? `${i.real}/${basename(info.source.real)}` : `${i.real}/new-folder`;
+      if (i.exists && !i.is_dir) box.append(line("failed", `✗ ${i.real} is a file, not a folder`));
+      else if (!i.exists) box.append(line("ok", `✓ ${where}  ·  new folder, created on the first backup`));
+      else if (i.marker) box.append(line("ok", `✓ ${where}  ·  existing backup made by Backup Manager, will be updated`));
+      else if (i.empty) box.append(line("ok", `✓ ${where}  ·  empty folder`));
+      else box.append(line("failed", `✗ ${where}  ·  this folder already has other files, so it will be refused. Add a new folder name, e.g. ${suggestion}`));
+      const s = info.source;
+      if (s?.ok && s.drive && i.drive && s.drive === i.drive)
+        box.append(line("failed", `✗ Same drive as the source (${i.drive}). The backup must go on a different drive.`));
+    }
+  }
+
+  const timers = {};
+  function lookup(field) {
+    clearTimeout(timers[field]);
+    timers[field] = setTimeout(async () => {
+      const value = $(field).value.trim();
+      info[field] = value ? await api("/api/path", value) : null;
+      render(field);
+      if (field === "source") render("dest");  // same-drive warning depends on both
+    }, 300);
+  }
+  for (const field of ["source", "dest"]) {
+    $(field).addEventListener("input", () => lookup(field));
+    if ($(field).value.trim()) lookup(field);
+  }
+
+  // --- folder picker --------------------------------------------------------------
+  async function show(field, path) {
+    const box = $(field + "-picker"), data = await api("/api/browse", path);
+    const use = (p) => { $(field).value = p; box.hidden = true; lookup(field); };
+    const go = (p) => show(field, p);
+
+    const places = el("div", {className: "places"}, ...data.places.map(pl =>
+      el("button", {type: "button", textContent: pl.label, onclick: () => go(pl.path)})));
+    const actions = el("div", {className: "actions"},
+      el("strong", {textContent: data.path}), el("span", {className: "mute", textContent: data.drive ? `  drive ${data.drive}` : ""}),
+      el("br"),
+      data.parent !== null ? el("button", {type: "button", textContent: "⬆ Up", onclick: () => go(data.parent)}) : "",
+      el("button", {type: "button", className: "primary", textContent: "Use this folder", onclick: () => use(data.path)}));
+    if (field === "dest" && info.source?.ok && info.source.is_dir) {
+      const p = `${data.path.replace(/\/$/, "")}/${basename(info.source.real)}`;
+      actions.append(el("button", {type: "button", textContent: `Use new folder ${p}`, onclick: () => use(p)}));
+    }
+    const list = el("ul", {className: "dirs"}, ...data.dirs.map(d =>
+      el("li", {}, el("a", {href: "#", textContent: "📁 " + d.name + (d.link ? `  → ${d.path}` : ""),
+                            onclick: (ev) => { ev.preventDefault(); go(d.path); }}))));
+    if (!data.dirs.length) list.append(el("li", {className: "mute", textContent: data.error || "(no subfolders)"}));
+    if (data.truncated) list.append(el("li", {className: "mute", textContent: "(only the first folders are shown)"}));
+    box.replaceChildren(places, actions, list);
+    box.hidden = false;
+  }
+  for (const b of document.querySelectorAll("button.browse")) {
+    b.addEventListener("click", () => {
+      const field = b.dataset.for, box = $(field + "-picker");
+      if (!box.hidden) { box.hidden = true; return; }
+      show(field, info[field]?.ok ? info[field].real : $(field).value.trim());
+    });
+  }
+})();
+</script>
 
 <h3>Drives on this machine</h3>
 {% include "_drives.html" %}

@@ -7,6 +7,8 @@ services:
       - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-8095}:8095"
     environment:
       UI_PASSWORD: ${UI_PASSWORD:-}
+      # What ~ means in the job form: the home folder of whoever runs `make up`.
+      HOST_HOME: ${HOME:-}
     volumes:
       # The whole host filesystem, so any folder can be a source or destination.
       # rslave: a drive mounted on the host later (e.g. /mnt/bulk) appears here too,

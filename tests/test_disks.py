@@ -56,7 +56,9 @@ class CheckPair(unittest.TestCase):
         self.root = self.tmp.name
         for d in ("home/me", "mnt/bulk/backups", "mnt/bulk/data"):
             os.makedirs(os.path.join(self.root, d))
-        os.symlink(os.path.join(self.root, "mnt/bulk"), os.path.join(self.root, "bulklink"))
+        # host symlinks: absolute targets are host paths, like ~/Bulk -> /mnt/bulk
+        os.symlink("/mnt/bulk", os.path.join(self.root, "home/me/Bulk"))
+        os.symlink("../mnt/bulk/data", os.path.join(self.root, "relative-data"))
 
         def fake_disks(cpath):
             return {"sdb"} if disks.to_host(cpath).startswith("/mnt/bulk") else {"nvme0n1"}
@@ -65,6 +67,7 @@ class CheckPair(unittest.TestCase):
             return os.path.join(self.root, "mnt/bulk") if disks.to_host(cpath).startswith("/mnt/bulk") else self.root
 
         self.patches = [mock.patch.object(disks, "HOST_ROOT", self.root),
+                        mock.patch.object(disks, "HOST_HOME", "/home/me"),
                         mock.patch.object(disks, "disks_of", fake_disks),
                         mock.patch.object(disks, "mount_point", fake_mount)]
         for p in self.patches:
@@ -97,9 +100,27 @@ class CheckPair(unittest.TestCase):
         with self.assertRaisesRegex(PathError, "does not exist"):
             disks.check_pair("/home/nobody", "/mnt/bulk/backups/x")
 
-    def test_symlink_refused(self):
-        with self.assertRaisesRegex(PathError, "symlink"):
-            disks.check_pair("/home/me", "/bulklink/backups")
+    def test_symlinks_resolved_like_the_host(self):
+        self.assertEqual(disks.resolve("/home/me/Bulk/backups/new"), "/mnt/bulk/backups/new")
+        self.assertEqual(disks.resolve("/relative-data"), "/mnt/bulk/data")
+        p = disks.check_pair("/home/me", "/home/me/Bulk/backups/home")
+        self.assertEqual(p.dest, "/mnt/bulk/backups/home")
+        self.assertEqual(p.dst_disks, {"sdb"})
+
+    def test_tilde_is_the_host_home(self):
+        self.assertEqual(disks.resolve("~"), "/home/me")
+        self.assertEqual(disks.resolve("~/Bulk/data"), "/mnt/bulk/data")
+        p = disks.check_pair("~/Bulk/data", "~/backup/data")
+        self.assertEqual((p.source, p.dest), ("/mnt/bulk/data", "/home/me/backup/data"))
+
+    def test_nesting_detected_through_symlinks(self):
+        with self.assertRaisesRegex(PathError, "inside the source"):
+            disks.check_pair("/mnt/bulk", "/home/me/Bulk/backups")
+
+    def test_symlink_loop_refused(self):
+        os.symlink("/loop", os.path.join(self.root, "loop"))
+        with self.assertRaisesRegex(PathError, "Too many symlinks"):
+            disks.resolve("/loop/x")
 
 
 class RealContainerMounts(unittest.TestCase):

@@ -102,6 +102,20 @@ class UnmountedDrive(unittest.TestCase):
                 engine.check_before_run(job)
 
 
+class PathNowElsewhere(unittest.TestCase):
+    def test_run_refused_when_saved_path_resolves_elsewhere(self):
+        job = {"source": "/home/me", "dest": "/mnt/bulk/b", "src_mount": "/", "dst_mount": "/mnt/bulk",
+               "dst_disks": "sdb"}
+        moved = engine.disks.Placement("/home/me", "/mnt/other/b", "/", "/mnt/bulk", {"nvme0n1"}, {"sdb"})
+        with mock.patch.object(engine.disks, "nearest_existing", lambda p: p), \
+             mock.patch.object(engine.disks, "to_host", lambda p: p), \
+             mock.patch.object(engine.disks, "to_container", lambda p: p), \
+             mock.patch.object(engine.disks, "mount_point", lambda p: "/mnt/bulk" if "bulk" in p else "/"), \
+             mock.patch.object(engine.disks, "check_pair", lambda s, d: moved):
+            with self.assertRaisesRegex(RunRefused, "now leads to /mnt/other/b"):
+                engine.check_before_run(job)
+
+
 @unittest.skipUnless(HAS_RSYNC, "rsync not installed")
 class RsyncModes(unittest.TestCase):
     def setUp(self):
