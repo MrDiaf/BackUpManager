@@ -112,7 +112,8 @@ def runs_for(job_id, limit=50):
 
 
 def last_run(job_id):
-    return one("SELECT * FROM runs WHERE job_id = ? ORDER BY id DESC LIMIT 1", (job_id,))
+    """Latest real backup run; dry-run checks don't count as backups."""
+    return one("SELECT * FROM runs WHERE job_id = ? AND trigger != 'check' ORDER BY id DESC LIMIT 1", (job_id,))
 
 
 def run(run_id):

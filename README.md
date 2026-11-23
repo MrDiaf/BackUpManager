@@ -32,6 +32,10 @@ fire, or a power surge that kills both drives are not covered.
 - **Schedule**: daily at a per-job time (default 03:00, host time zone), plus a **Run now**
   button. If the machine was off at the scheduled time, the job runs as soon as the app
   starts again. Jobs run one at a time.
+- **Check (dry run)** button per job: runs every safety check and `rsync --dry-run`, and
+  reports how many files a backup would copy and delete. It writes nothing: the
+  pre-backup command is skipped, and no marker, snapshot or pruning happens. Checks show
+  in the job's run history but don't count as the last backup on the dashboard.
 - **Pre-backup command** (optional, per job), for example a database dump. If it exits
   non-zero, the backup is not run and is marked failed.
 - **Dashboard**: status (OK / failed / running), last run, duration, size, next run, logs
@@ -62,8 +66,11 @@ username and the password shown by `make password`.
    `/home/ronny` → `/mnt/bulk/backups/home`, or `/mnt/bulk/photos` →
    `/home/ronny/backups/photos` for the other direction. The form lists your drives, and an
    error explains why a pair is refused.
-3. Pick *Mirror* or *Dated daily copies*, set the time, and save.
-4. Click **Run now** once to check that it works, then watch the dashboard (it refreshes
+3. Pick *Mirror* or *Dated daily copies* and set the time.
+4. Click **Check (dry run)** beside Save to confirm the drives and paths are right and to
+   see what the first backup would copy. Nothing is saved or written. Then click **Save**.
+   The job page and the dashboard have a **Check** button too.
+5. Click **Run now** for the first real backup, then watch the dashboard (it refreshes
    every 15 s). Click a run's time to see its rsync log.
 
 Other commands: `make password` (UI password), `make logs` (app logs), `make status`, `make restart`, `make test` (unit

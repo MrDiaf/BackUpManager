@@ -19,7 +19,7 @@
   code, pre { font: 13px/1.4 ui-monospace, monospace; }
   pre.log { background:#111; color:#ddd; padding:1rem; overflow:auto; max-height:70vh; white-space: pre-wrap; word-break: break-all; }
   .status { font-weight: 600; white-space: nowrap; }
-  .ok { color: var(--ok); } .failed { color: var(--bad); } .running, .queued { color: var(--run); } .never { color: var(--mute); }
+  .ok { color: var(--ok); } .failed { color: var(--bad); } .running, .queued, .checking { color: var(--run); } .never { color: var(--mute); }
   .mute { color: var(--mute); font-size: .9em; }
   .flash { padding:.6rem .9rem; border-left: 4px solid var(--run); background: rgba(90,169,255,.1); margin-bottom: 1rem; }
   .error { padding:.6rem .9rem; border-left: 4px solid var(--bad); background: rgba(255,80,80,.1); margin-bottom: 1rem; }
@@ -31,6 +31,7 @@
   button.primary { background: var(--run); color: #fff; border-color: var(--run); }
   button.danger { color: var(--bad); border-color: var(--bad); }
   label { display:block; font-weight:600; margin-top: 1rem; }
+  input[type=text], textarea { display:block; margin-top:.3rem; }
   label .mute { font-weight: normal; }
   input[type=text], input[type=number], input[type=time], textarea, select { font: inherit; padding:.35rem .5rem; border:1px solid #bbb; border-radius:4px; width: 100%; max-width: 640px; box-sizing: border-box; }
   input[type=number], input[type=time] { width: 8rem; }

@@ -10,7 +10,7 @@
   <tr>
     <td><a href="{{ url_for('job_page', job_id=j.id) }}">{{ j.name }}</a><br>
       <span class="mute">{{ j.source }} → {{ j.dest }} · {{ j.mode }}</span></td>
-    <td class="status {{ r.status }}">{{ {'ok':'OK','failed':'Failed','running':'Running','queued':'Queued','never':'Never run'}[r.status] }}
+    <td class="status {{ r.status }}">{{ {'ok':'OK','failed':'Failed','running':'Running','queued':'Queued','checking':'Checking','never':'Never run'}[r.status] }}
       {% if r.status == 'failed' and r.last %}<br><span class="mute">{{ r.last.message }}</span>{% endif %}</td>
     <td>{% if r.last %}<a href="{{ url_for('run_page', run_id=r.last.id) }}">{{ r.last.started|when }}</a>{% else %}—{% endif %}</td>
     <td class="num">{{ duration(r.last) }}</td>
@@ -18,7 +18,9 @@
     <td>{{ j.next_run|when if j.enabled else 'disabled' }}</td>
     <td><form class="inline" method="post" action="{{ url_for('run_now', job_id=j.id) }}">
       <input type="hidden" name="next" value="{{ url_for('dashboard') }}">
-      <button {% if r.status in ('running','queued') %}disabled{% endif %}>Run now</button></form></td>
+      <button {% if r.status in ('running','queued','checking') %}disabled{% endif %}>Run now</button></form>
+      <form class="inline" method="post" action="{{ url_for('check_now', job_id=j.id) }}">
+      <button title="Dry run: checks drives and shows what would be copied, writes nothing" {% if r.status in ('running','queued','checking') %}disabled{% endif %}>Check</button></form></td>
   </tr>
   {% endfor %}
 </table>

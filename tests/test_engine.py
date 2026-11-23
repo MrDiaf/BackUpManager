@@ -141,5 +141,72 @@ class RsyncModes(unittest.TestCase):
         self.assertEqual(a2.st_ino, a3.st_ino)  # unchanged file is hard-linked, not copied
 
 
+def tree(path):
+    """Every path under `path` with its size and mtime, to prove nothing changed."""
+    result = {}
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            p = os.path.join(root, name)
+            st = os.lstat(p)
+            result[os.path.relpath(p, path)] = (st.st_size, st.st_mtime_ns)
+    return result
+
+
+@unittest.skipUnless(HAS_RSYNC, "rsync not installed")
+class DryRunCheck(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.src = os.path.join(self.tmp.name, "src")
+        self.dst = os.path.join(self.tmp.name, "dst")
+        os.makedirs(self.src)
+        with open(os.path.join(self.src, "a.txt"), "w") as f:
+            f.write("hello")
+        self.log = open(os.path.join(self.tmp.name, "log"), "w+")
+        self.host = mock.patch.object(engine.disks, "HOST_ROOT", self.tmp.name)
+        self.host.start()
+
+    def tearDown(self):
+        self.host.stop()
+        self.log.close()
+        self.tmp.cleanup()
+
+    def job(self, mode):
+        return {"mode": mode, "pre_command": ""}
+
+    def test_first_run_check_creates_nothing(self):
+        for mode in ("mirror", "snapshot"):
+            size, msg = engine.dry_run(self.job(mode), self.src, self.dst, self.log)
+            self.assertFalse(os.path.exists(self.dst))
+            self.assertEqual(size, 5)
+            self.assertIn("copy 1 file(s)", msg)
+
+    def test_mirror_check_reports_changes_without_writing(self):
+        engine.prepare_destination(self.dst, 1, self.log)
+        engine.run_mirror(self.src, self.dst, self.log)
+        open(os.path.join(self.dst, "stale.txt"), "w").close()       # would be deleted
+        with open(os.path.join(self.src, "new.txt"), "w") as f:       # would be copied
+            f.write("new!")
+        before = tree(self.dst)
+        _, msg = engine.dry_run(self.job("mirror"), self.src, self.dst, self.log)
+        self.assertEqual(tree(self.dst), before)
+        self.assertIn("copy 1 file(s)", msg)
+        self.assertIn("delete 1 file(s)", msg)
+
+    def test_snapshot_check_makes_no_snapshot(self):
+        engine.prepare_destination(self.dst, 1, self.log)
+        engine.run_snapshot(self.src, self.dst, self.log, 7, 4, now=datetime(2026, 1, 1, 3))
+        before = tree(self.dst)
+        _, msg = engine.dry_run(self.job("snapshot"), self.src, self.dst, self.log)
+        self.assertEqual(tree(self.dst), before)
+        self.assertIn("copy 0 file(s)", msg)  # unchanged file would be hard-linked
+
+    def test_check_refuses_foreign_destination(self):
+        os.makedirs(self.dst)
+        open(os.path.join(self.dst, "precious.txt"), "w").close()
+        with self.assertRaisesRegex(RunRefused, "not empty"):
+            engine.dry_run(self.job("mirror"), self.src, self.dst, self.log)
+        self.assertFalse(os.path.exists(os.path.join(self.dst, engine.MARKER)))
+
+
 if __name__ == "__main__":
     unittest.main()

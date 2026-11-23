@@ -44,6 +44,26 @@ class Auth(unittest.TestCase):
         headers = {**basic("s3cret"), "Origin": "http://localhost"}
         self.assertEqual(self.client.post("/jobs/new", headers=headers, data={"name": ""}).status_code, 400)
 
+    FORM = {"name": "t", "source": "/a", "dest": "/b", "mode": "mirror", "keep_daily": "7",
+            "keep_weekly": "4", "run_time": "03:00", "enabled": "1", "action": "check"}
+
+    def test_form_check_shows_result_and_saves_nothing(self):
+        with mock.patch.object(web, "validate", lambda v: v), \
+             mock.patch.object(web, "check_job", lambda job, log: (5, "Check OK. Would copy 1 file(s).")):
+            r = self.client.post("/jobs/new", data=self.FORM, headers=basic("s3cret"))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Check OK. Would copy 1 file(s).", r.data)
+        self.assertEqual(db.jobs(), [])
+
+    def test_form_check_failure_is_shown(self):
+        def refuse(job, log):
+            raise web.RunRefused("Destination drive is not mounted")
+        with mock.patch.object(web, "validate", lambda v: v), mock.patch.object(web, "check_job", refuse):
+            r = self.client.post("/jobs/new", data=self.FORM, headers=basic("s3cret"))
+        self.assertIn(b"Check failed", r.data)
+        self.assertIn(b"Destination drive is not mounted", r.data)
+        self.assertEqual(db.jobs(), [])
+
 
 class PasswordFile(unittest.TestCase):
     def test_generated_once_and_reused(self):

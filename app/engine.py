@@ -5,6 +5,7 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
@@ -62,9 +63,30 @@ def snapshots_to_keep(names, keep_daily, keep_weekly):
     return keep
 
 
-def parse_total_size(rsync_output):
-    m = re.search(r"Total file size: ([\d,.]+) bytes", rsync_output)
+def _stat(rsync_output, label):
+    m = re.search(label + r": ([\d,.]+)", rsync_output)
     return int(re.sub(r"[,.]", "", m.group(1))) if m else None
+
+
+def parse_total_size(rsync_output):
+    return _stat(rsync_output, "Total file size")
+
+
+def human_size(n):
+    if n is None:
+        return "—"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def dry_run_summary(rsync_output):
+    files = _stat(rsync_output, "Number of regular files transferred") or 0
+    sent = _stat(rsync_output, "Total transferred file size") or 0
+    deleted = _stat(rsync_output, "Number of deleted files") or 0
+    return (f"Check OK. A backup now would copy {files} file(s) ({human_size(sent)}) "
+            f"and delete {deleted} file(s) from the backup. Nothing was written.")
 
 
 # --- safety checks --------------------------------------------------------------
@@ -100,15 +122,22 @@ def check_source_not_empty(csrc):
                              "(an unmounted or broken source would otherwise wipe the backup).")
 
 
-def prepare_destination(cdst, job_id, log):
-    """The destination must carry our marker, or be missing/empty (first run)."""
-    marker = os.path.join(cdst, MARKER)
-    if os.path.isfile(marker):
-        return
+def destination_is_new(cdst):
+    """The destination must carry our marker, or be missing/empty (first run).
+    Returns True for a first run. Only inspects; writes nothing."""
+    if os.path.isfile(os.path.join(cdst, MARKER)):
+        return False
     if os.path.isdir(cdst) and os.listdir(cdst):
         raise RunRefused(
             f"Destination {disks.to_host(cdst)} is not empty and was not created by this backup manager "
             f"(no {MARKER} file). Refusing to write into it. Choose an empty or new folder.")
+    return True
+
+
+def prepare_destination(cdst, job_id, log):
+    if not destination_is_new(cdst):
+        return
+    marker = os.path.join(cdst, MARKER)
     os.makedirs(cdst, exist_ok=True)
     with open(marker, "w") as f:
         f.write(f"Backup destination of backupmanager job {job_id}, created {datetime.now().isoformat(timespec='seconds')}.\n"
@@ -131,11 +160,11 @@ def _rsync(args, log):
         log.write("Note: some files vanished while copying (rsync code 24). This is normal for live folders.\n")
     elif code != 0:
         raise RunFailed(f"rsync failed with exit code {code}. See the log.")
-    return parse_total_size(output)
+    return output
 
 
 def run_mirror(csrc, cdst, log):
-    return _rsync(RSYNC_BASE + [f"--exclude=/{MARKER}", csrc.rstrip("/") + "/", cdst.rstrip("/") + "/"], log)
+    return parse_total_size(_rsync(RSYNC_BASE + [f"--exclude=/{MARKER}", csrc.rstrip("/") + "/", cdst.rstrip("/") + "/"], log))
 
 
 def run_snapshot(csrc, cdst, log, keep_daily, keep_weekly, now=None):
@@ -145,7 +174,7 @@ def run_snapshot(csrc, cdst, log, keep_daily, keep_weekly, now=None):
     args = RSYNC_BASE[:]
     if snaps:
         args.append(f"--link-dest={os.path.join(cdst, snaps[-1])}")
-    size = _rsync(args + [csrc.rstrip("/") + "/", work + "/"], log)
+    size = parse_total_size(_rsync(args + [csrc.rstrip("/") + "/", work + "/"], log))
 
     name = now.strftime(SNAPSHOT_FMT)
     os.rename(work, os.path.join(cdst, name))
@@ -178,10 +207,54 @@ def run_pre_command(command, csrc, cdst, log):
         raise RunFailed(f"Pre-backup command failed with exit code {code}. Backup not started.")
 
 
+def dry_run(job, csrc, cdst, log):
+    """rsync --dry-run with the real options. Writes nothing anywhere.
+    Returns (total size, summary message)."""
+    first_run = destination_is_new(cdst)
+    if first_run:
+        log.write(f"First run: {disks.to_host(cdst)} would be created with a {MARKER} marker.\n")
+    with tempfile.TemporaryDirectory() as empty:
+        args = RSYNC_BASE + ["--dry-run"]
+        target = empty
+        if job["mode"] == "mirror":
+            args.append(f"--exclude=/{MARKER}")
+            if not first_run:
+                target = cdst
+        elif not first_run:
+            snaps = sorted(n for n in os.listdir(cdst) if SNAPSHOT_RE.match(n))
+            if snaps:
+                args.append(f"--link-dest={os.path.join(cdst, snaps[-1])}")
+        output = _rsync(args + [csrc.rstrip("/") + "/", target + "/"], log)
+    return parse_total_size(output), dry_run_summary(output)
+
+
 # --- running a job ----------------------------------------------------------------
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def check_job(job, log):
+    """Dry run of a job (saved, or unsaved values from the form). Writes nothing.
+    Raises RunRefused/RunFailed; returns (total size, summary message)."""
+    csrc, cdst = check_before_run(job)
+    log.write("CHECK (dry run): nothing will be written.\n")
+    if job["pre_command"].strip():
+        log.write(f"Pre-backup command would run first (skipped in a check):\n$ {job['pre_command']}\n")
+    check_source_not_empty(csrc)
+    return dry_run(job, csrc, cdst, log)
+
+
+def backup(job, csrc, cdst, log):
+    if job["pre_command"].strip():
+        run_pre_command(job["pre_command"], csrc, cdst, log)
+    check_source_not_empty(csrc)
+    prepare_destination(cdst, job["id"], log)
+    if job["mode"] == "mirror":
+        size = run_mirror(csrc, cdst, log)
+    else:
+        size = run_snapshot(csrc, cdst, log, job["keep_daily"], job["keep_weekly"])
+    return "ok", "Backup complete.", size
 
 
 def execute_job(job_id, trigger):
@@ -194,16 +267,12 @@ def execute_job(job_id, trigger):
     with open(db.log_path(run_id), "w") as log:
         log.write(f"[{now_iso()}] Job '{job['name']}' ({job['mode']}): {job['source']} -> {job['dest']}\n")
         try:
-            csrc, cdst = check_before_run(job)
-            if job["pre_command"].strip():
-                run_pre_command(job["pre_command"], csrc, cdst, log)
-            check_source_not_empty(csrc)
-            prepare_destination(cdst, job_id, log)
-            if job["mode"] == "mirror":
-                size = run_mirror(csrc, cdst, log)
+            if trigger == "check":
+                size, message = check_job(job, log)
+                status = "ok"
             else:
-                size = run_snapshot(csrc, cdst, log, job["keep_daily"], job["keep_weekly"])
-            status, message = "ok", "Backup complete."
+                csrc, cdst = check_before_run(job)
+                status, message, size = backup(job, csrc, cdst, log)
         except (RunRefused, RunFailed) as e:
             message = str(e)
         except Exception as e:
@@ -219,7 +288,7 @@ class Engine:
         self._queue = queue.Queue()
         self._lock = threading.Lock()
         self.pending = set()   # job ids queued or running
-        self.current = None    # job id running now
+        self.current = None    # (job id, trigger) running now
 
     def enqueue(self, job_id, trigger="manual"):
         with self._lock:
@@ -230,14 +299,14 @@ class Engine:
         return True
 
     def state(self, job_id):
-        if self.current == job_id:
-            return "running"
+        if self.current and self.current[0] == job_id:
+            return "checking" if self.current[1] == "check" else "running"
         return "queued" if job_id in self.pending else None
 
     def _worker(self):
         while True:
             job_id, trigger = self._queue.get()
-            self.current = job_id
+            self.current = (job_id, trigger)
             try:
                 execute_job(job_id, trigger)
             except Exception:

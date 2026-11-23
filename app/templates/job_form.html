@@ -3,6 +3,13 @@
 {% block body %}
 <h2>{{ 'Edit job' if job_id else 'New backup job' }}</h2>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if check %}
+<div class="{{ 'flash' if check.ok else 'error' }}" id="check-result">
+  {% if check.ok %}<strong>{{ check.message }}</strong>{% else %}<strong>Check failed:</strong> {{ check.message }}{% endif %}
+  {% if check.ok %}<br><span class="mute">The job is not saved yet. Click Save to keep it.</span>{% endif %}
+  <details><summary>Log</summary><pre class="log">{{ check.log }}</pre></details>
+</div>
+{% endif %}
 <form method="post">
   <label>Name <input type="text" name="name" value="{{ job.name }}" required></label>
 
@@ -32,7 +39,8 @@
 
   <label><input type="checkbox" name="enabled" value="1" {% if job.enabled %}checked{% endif %}> Enabled (run daily)</label>
 
-  <p><button class="primary">Save</button>
+  <p><button class="primary" name="action" value="save">Save</button>
+    <button name="action" value="check" title="Dry run with these values: checks the drives and shows what would be copied. Nothing is saved or written.">Check (dry run)</button>
     <a class="button" href="{{ url_for('job_page', job_id=job_id) if job_id else url_for('dashboard') }}">Cancel</a></p>
 </form>
 

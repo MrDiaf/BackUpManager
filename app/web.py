@@ -2,6 +2,8 @@ import hmac
 import os
 import re
 import secrets
+import tempfile
+import traceback
 from datetime import datetime
 from urllib.parse import urlsplit
 
@@ -10,7 +12,7 @@ from flask import Flask, Response, abort, flash, redirect, render_template, requ
 import db
 import disks
 from disks import PathError
-from engine import Engine, next_occurrence
+from engine import Engine, RunFailed, RunRefused, check_job, human_size, next_occurrence
 
 app = Flask(__name__)
 app.secret_key = os.urandom(32)  # only used for flash messages
@@ -62,14 +64,7 @@ def health():
 
 # --- formatting -------------------------------------------------------------------
 
-@app.template_filter("size")
-def fmt_size(n):
-    if n is None:
-        return "—"
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
+app.template_filter("size")(human_size)
 
 
 @app.template_filter("when")
@@ -144,12 +139,36 @@ def validate(v):
     return v
 
 
+FORM_CHECK_LOG_CHARS = 20000
+
+
+def check_form_values(values):
+    """Dry-run unsaved job values. Returns a dict for the template."""
+    with tempfile.NamedTemporaryFile("w+", suffix=".log") as log:
+        try:
+            _, message = check_job(values, log)
+            ok = True
+        except (RunRefused, RunFailed) as e:
+            ok, message = False, str(e)
+        except Exception as e:
+            ok, message = False, f"Unexpected error: {e}"
+            log.write(traceback.format_exc())
+        log.flush()
+        log.seek(0)
+        text = log.read()
+    return {"ok": ok, "message": message, "log": text[-FORM_CHECK_LOG_CHARS:]}
+
+
 def save_from_form(job_id):
     v = form_values(request.form)
+    checking = request.form.get("action") == "check"
     try:
         values = validate(dict(v))
     except (PathError, ValueError) as e:
         return render_template("job_form.html", job=v, job_id=job_id, error=str(e), drives=disks.drives()), 400
+    if checking:
+        return render_template("job_form.html", job=v, job_id=job_id, error=None, drives=disks.drives(),
+                               check=check_form_values(values))
     job_id = db.save_job(values, job_id)
     flash(f"Saved. Source is on {values['src_disks']}, backup goes to {values['dst_disks']}.")
     return redirect(url_for("job_page", job_id=job_id))
@@ -184,8 +203,7 @@ def edit_job(job_id):
 @app.get("/jobs/<int:job_id>")
 def job_page(job_id):
     job = get_job_or_404(job_id)
-    runs = db.runs_for(job_id)
-    return render_template("job.html", job=job, runs=runs, status=job_status(job, runs[0] if runs else None))
+    return render_template("job.html", job=job, runs=db.runs_for(job_id), status=job_status(job, db.last_run(job_id)))
 
 
 @app.post("/jobs/<int:job_id>/run")
@@ -193,6 +211,14 @@ def run_now(job_id):
     get_job_or_404(job_id)
     flash("Backup started." if engine.enqueue(job_id) else "This job is already queued or running.")
     return redirect(request.form.get("next") or url_for("job_page", job_id=job_id))
+
+
+@app.post("/jobs/<int:job_id>/check")
+def check_now(job_id):
+    get_job_or_404(job_id)
+    flash("Check started (dry run, nothing is written). The result appears under Runs."
+          if engine.enqueue(job_id, "check") else "This job is already queued or running.")
+    return redirect(url_for("job_page", job_id=job_id))
 
 
 @app.post("/jobs/<int:job_id>/delete")

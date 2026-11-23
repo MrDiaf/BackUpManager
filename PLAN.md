@@ -38,3 +38,10 @@ Order: 01 → 02 → 03 → 04 → 05. Each milestone depends on the previous on
 - [x] Every page except `/health` requires the password (401 without it)
 - [x] A random password is generated on first start unless `UI_PASSWORD` is set; `make password` shows it
 - [x] Cross-site POSTs are still refused, also with valid credentials
+
+## Milestone 07 — Dry-run check (v1.1.0)
+- [x] Each job has a "Check" button (dashboard and job page)
+- [x] A check runs all run-time safety checks and `rsync --dry-run`, and reports what would be copied and deleted
+- [x] A check writes nothing: no pre-command, no marker, no snapshot, no pruning
+- [x] Checks appear in the job's run history but don't change the dashboard's last-backup status
+- [x] The job form has a Check button beside Save that dry-runs the unsaved values and shows the result in the form
