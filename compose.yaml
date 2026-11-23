@@ -1,0 +1,21 @@
+services:
+  backupmanager:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Reachable from the LAN; every page requires the password (see `make password`).
+      - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-8095}:8095"
+    environment:
+      UI_PASSWORD: ${UI_PASSWORD:-}
+    volumes:
+      # The whole host filesystem, so any folder can be a source or destination.
+      # rslave: a drive mounted on the host later (e.g. /mnt/bulk) appears here too,
+      # and an unmounted drive disappears here too.
+      - type: bind
+        source: /
+        target: /host
+        bind:
+          propagation: rslave
+      - ./data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock

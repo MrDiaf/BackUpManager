@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block head %}{% if run.status == 'running' %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block title %}Run {{ run.id }}{% endblock %}
+{% block body %}
+<h2>{% if job %}<a href="{{ url_for('job_page', job_id=job.id) }}">{{ job.name }}</a>{% endif %} · run {{ run.started|when }}</h2>
+<p><span class="status {{ run.status }}">{{ run.status }}</span> · {{ duration(run) }} · {{ run.size_bytes|size }} · {{ run.trigger }}
+  {% if run.message %}<br>{{ run.message }}{% endif %}</p>
+<p><a href="{{ url_for('run_log', run_id=run.id) }}">Full log (plain text)</a>
+  {% if truncated %}<span class="mute">— showing only the end of the log below</span>{% endif %}</p>
+<pre class="log">{{ log }}</pre>
+{% endblock %}

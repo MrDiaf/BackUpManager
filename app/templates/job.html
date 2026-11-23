@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block head %}{% if status in ('running', 'queued') %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block title %}{{ job.name }}{% endblock %}
+{% block body %}
+<h2>{{ job.name }} <span class="status {{ status }}">· {{ status }}</span></h2>
+<table>
+  <tr><th>Source</th><td><code>{{ job.source }}</code> <span class="mute">on {{ job.src_disks }}, filesystem {{ job.src_mount }}</span></td></tr>
+  <tr><th>Destination</th><td><code>{{ job.dest }}</code> <span class="mute">on {{ job.dst_disks }}, filesystem {{ job.dst_mount }}</span></td></tr>
+  <tr><th>Mode</th><td>{% if job.mode == 'mirror' %}Mirror{% else %}Dated daily copies (keep {{ job.keep_daily }} daily, {{ job.keep_weekly }} weekly){% endif %}</td></tr>
+  <tr><th>Schedule</th><td>{% if job.enabled %}Daily at {{ job.run_time }} · next {{ job.next_run|when }}{% else %}Disabled{% endif %}</td></tr>
+  <tr><th>Pre-backup command</th><td>{% if job.pre_command %}<pre>{{ job.pre_command }}</pre>{% else %}<span class="mute">none</span>{% endif %}</td></tr>
+</table>
+<p>
+  <form class="inline" method="post" action="{{ url_for('run_now', job_id=job.id) }}"><button class="primary" {% if status in ('running','queued') %}disabled{% endif %}>Run now</button></form>
+  <a class="button" href="{{ url_for('edit_job', job_id=job.id) }}">Edit</a>
+  <form class="inline" method="post" action="{{ url_for('delete_job', job_id=job.id) }}"
+        onsubmit="return confirm('Delete this job and its history? Backed-up files are NOT deleted.')"><button class="danger">Delete job</button></form>
+</p>
+
+<h3>Runs</h3>
+<table>
+  <tr><th>Started</th><th>Trigger</th><th>Status</th><th class="num">Duration</th><th class="num">Size</th><th>Message</th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><a href="{{ url_for('run_page', run_id=r.id) }}">{{ r.started|when }}</a></td>
+    <td>{{ r.trigger }}</td>
+    <td class="status {{ r.status }}">{{ r.status }}</td>
+    <td class="num">{{ duration(r) }}</td>
+    <td class="num">{{ r.size_bytes|size }}</td>
+    <td>{{ r.message }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="mute">No runs yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

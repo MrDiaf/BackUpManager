@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit job' if job_id else 'New job' }}{% endblock %}
+{% block body %}
+<h2>{{ 'Edit job' if job_id else 'New backup job' }}</h2>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form method="post">
+  <label>Name <input type="text" name="name" value="{{ job.name }}" required></label>
+
+  <label>Source folder <span class="mute">— host path to back up, e.g. /home/you</span>
+    <input type="text" name="source" value="{{ job.source }}" required placeholder="/home/you"></label>
+
+  <label>Destination folder <span class="mute">— host path on a <em>different</em> drive; it must be empty or new on the first run</span>
+    <input type="text" name="dest" value="{{ job.dest }}" required placeholder="/mnt/bulk/backups/home"></label>
+
+  <fieldset>
+    <legend>Mode</legend>
+    <label><input type="radio" name="mode" value="mirror" {% if job.mode == 'mirror' %}checked{% endif %}> Mirror
+      <span class="mute">— one exact copy; files deleted from the source are deleted from the backup</span></label>
+    <label><input type="radio" name="mode" value="snapshot" {% if job.mode == 'snapshot' %}checked{% endif %}> Dated daily copies
+      <span class="mute">— a folder per run (hard-linked, so unchanged files take no extra space)</span></label>
+    <label>Keep daily <input type="number" name="keep_daily" min="1" value="{{ job.keep_daily }}"></label>
+    <label>Keep weekly <input type="number" name="keep_weekly" min="0" value="{{ job.keep_weekly }}"></label>
+    <p class="mute">Keep counts are used only for dated copies.</p>
+  </fieldset>
+
+  <label>Daily run time <span class="mute">— 24h, host time zone</span>
+    <input type="time" name="run_time" value="{{ job.run_time }}" required></label>
+
+  <label>Run this command before the backup <span class="mute">— optional; runs with <code>sh -c</code> inside the source folder; a non-zero exit cancels the backup</span>
+    <textarea name="pre_command" rows="3" placeholder="docker exec my-postgres pg_dumpall -U postgres > pg_dumpall.sql">{{ job.pre_command }}</textarea></label>
+  <p class="mute">Inside the command, host path <code>/x</code> is <code>/host/x</code>; <code>$SOURCE</code> and <code>$DEST</code> hold the container paths. <code>docker</code> is available.</p>
+
+  <label><input type="checkbox" name="enabled" value="1" {% if job.enabled %}checked{% endif %}> Enabled (run daily)</label>
+
+  <p><button class="primary">Save</button>
+    <a class="button" href="{{ url_for('job_page', job_id=job_id) if job_id else url_for('dashboard') }}">Cancel</a></p>
+</form>
+
+<h3>Drives on this machine</h3>
+{% include "_drives.html" %}
+{% endblock %}

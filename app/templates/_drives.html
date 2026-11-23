@@ -1,0 +1,12 @@
+<table>
+  <tr><th>Mounted at</th><th>Physical drive</th><th>Device</th><th class="num">Free</th><th class="num">Size</th><th>Used</th></tr>
+  {% for d in drives %}{% set pct = (100 * d.used / d.total)|round|int if d.total else 0 %}
+  <tr>
+    <td><code>{{ d.mount }}</code></td><td>{{ d.disk }}</td><td class="mute">{{ d.device }} · {{ d.fstype }}</td>
+    <td class="num">{{ d.free|size }}</td><td class="num">{{ d.total|size }}</td>
+    <td><div class="bar {{ 'full' if pct >= 90 }}"><div style="width: {{ pct }}%"></div></div><span class="mute">{{ pct }}%</span></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="mute">No drives found. Is the host filesystem mounted at /host in the container?</td></tr>
+  {% endfor %}
+</table>
